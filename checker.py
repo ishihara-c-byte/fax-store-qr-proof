@@ -704,3 +704,59 @@ def findings_html(findings: list[Finding]) -> str:
         "<table style='border-collapse:collapse;font-size:13px;width:100%'>"
         f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
     )
+
+
+def dashboard_html(targets: list[TargetRow], findings: list[Finding]) -> str:
+    """数字のカード + 項目ごとの件数バー"""
+    fs = [f for f in findings if f.severity in ("高", "中")]
+    stores_bad = {f.excel_row for f in fs}
+    n_hi = sum(1 for f in fs if f.severity == "高")
+    n_mid = sum(1 for f in fs if f.severity == "中")
+
+    def card(label, value, color, bg):
+        return (
+            f"<div style='flex:1;min-width:130px;background:{bg};border-radius:10px;padding:12px 14px'>"
+            f"<div style='font-size:12px;color:#555'>{label}</div>"
+            f"<div style='font-size:28px;font-weight:700;color:{color};line-height:1.2'>{value}</div></div>"
+        )
+
+    cards = (
+        "<div style='display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px'>"
+        + card("チェックした店舗", f"{len(targets)}", "#222", "#f1f3f6")
+        + card("違いがある店舗", f"{len(stores_bad)}", "#222", "#f1f3f6")
+        + card("❌ 間違いの可能性大", f"{n_hi}件", "#b00020", "#fde2e4")
+        + card("⚠️ 要確認", f"{n_mid}件", "#8a5a00", "#fff4d6")
+        + "</div>"
+    )
+
+    item_to_col = {it: col for col, items in MATRIX_COLUMNS.items() for it in items}
+    per = {col: {"高": set(), "中": set()} for col in MATRIX_COLUMNS}
+    for f in fs:
+        col = item_to_col.get(f.item)
+        if col:
+            per[col][f.severity].add(f.excel_row)
+    mx = max([len(v["高"]) + len(v["中"]) for v in per.values()] + [1])
+    bars = []
+    for col, v in per.items():
+        hi, mid = len(v["高"]), len(v["中"])
+        if hi + mid == 0:
+            right = "<span style='color:#2e7d32'>✅ 問題なし</span>"
+        else:
+            right = (
+                f"<div style='display:flex;align-items:center;gap:8px'>"
+                f"<div style='display:flex;height:14px;width:{int(220 * (hi + mid) / mx)}px;min-width:8px;border-radius:3px;overflow:hidden'>"
+                f"<div style='flex:{hi};background:#e05260'></div><div style='flex:{mid};background:#f0b429'></div></div>"
+                f"<span>{'❌ ' + str(hi) + '店舗　' if hi else ''}{'⚠️ ' + str(mid) + '店舗' if mid else ''}</span></div>"
+            )
+        bars.append(
+            f"<tr><td style='padding:4px 10px 4px 0;white-space:nowrap;font-weight:600'>{col}</td>"
+            f"<td style='padding:4px 0'>{right}</td></tr>"
+        )
+    table = (
+        "<div style='font-size:13px;font-weight:600;margin-bottom:4px'>項目ごとの件数</div>"
+        "<table style='border-collapse:collapse;font-size:13px'>" + "".join(bars) + "</table>"
+    )
+    return (
+        "<div style='border:1px solid #ddd;border-radius:10px;padding:12px 14px;margin-bottom:12px'>"
+        + cards + "</div>"
+    )

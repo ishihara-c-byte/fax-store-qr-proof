@@ -120,8 +120,7 @@ for name, targets, findings, err in st.session_state.get("results", []):
     n_bad = sum(1 for r in mrows if r["判定"] != c.OK_MARK)
     if n_bad == 0:
         st.success(f"{len(targets)}店舗すべて、マスタと一致しました 🎉")
-    else:
-        st.markdown(f"**{len(targets)}店舗中 {n_bad}店舗に違いがあります**")
+    st.markdown(c.dashboard_html(targets, findings), unsafe_allow_html=True)
 
     st.caption("✅ 問題なし　❌ 間違いの可能性大　⚠️ 要確認　🔸 空白・ハイフンの違いだけ　／　違うマスは マスタ と Excel を上下に並べ、違う文字に色を付けています(青＝マスタ、赤＝Excel)")
     cc1, cc2 = st.columns([3, 1])
