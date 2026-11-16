@@ -289,6 +289,10 @@ def compare_field(kind: str, label: str, d_raw, m_raw, default: str = ""):
             return ("中", "マスタの価格が空欄。Excelの価格で正しいか確認")
         if not d:
             return ("高", f"Excelの{label}が空欄")
+        if not re.fullmatch(r"[\d,.]+円?", m):
+            if d and m.startswith(d):
+                return ("中", "マスタに変更メモあり(今の価格はExcelと同じ)。メモの時期を確認")
+            return ("中", "マスタに変更メモあり。価格を確認")
         return ("高", f"{label}がマスタと違う")
 
     if nospace(d) == nospace(m):
@@ -599,7 +603,7 @@ def _cell_html(fs: list[Finding], multi: bool) -> str:
     parts = []
     for f in fs:
         m, d = f.master.replace("\n", " "), f.draft.replace("\n", " ")
-        if m and d and f.item in VALUE_ITEMS:
+        if m and d and f.item in VALUE_ITEMS and not m.startswith(d):
             mh = f"<b style='background:#cfe2ff;color:#0a3d91'>{_html.escape(m)}</b>"
             dh = f"<b style='background:#ffc9c9;color:#a10000'>{_html.escape(d)}</b>"
         elif m and d:
@@ -661,6 +665,42 @@ def matrix_html(targets: list[TargetRow], findings: list[Finding], cols: list[st
         return "<p>違いがある店舗はありません 🎉</p>"
     return (
         "<div style='max-height:650px;overflow:auto;border:1px solid #ddd;border-radius:6px'>"
+        "<table style='border-collapse:collapse;font-size:13px;width:100%'>"
+        f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
+    )
+
+
+def findings_html(findings: list[Finding]) -> str:
+    """指摘一覧(1件1行)を、違う文字に色を付けたHTMLで返す"""
+    rows = [f for f in findings if f.severity != "情報"]
+    if not rows:
+        return "<p>指摘はありません 🎉</p>"
+    label = {"高": "❌ 高", "中": "⚠️ 中", "低": "🔸 低"}
+    th = "position:sticky;top:0;background:#444;color:#fff;padding:6px;font-weight:500;text-align:left"
+    td = "border:1px solid #ddd;padding:6px;vertical-align:top"
+    head = "".join(f"<th style='{th}'>{h}</th>" for h in ["重要度", "行", "店舗ID", "店舗名", "項目", "マスタ(正)", "Excel(原稿)", "コメント"])
+    body = []
+    for f in rows:
+        m, d = f.master.replace("\n", " "), f.draft.replace("\n", " ")
+        if m and d and f.item in VALUE_ITEMS and not m.startswith(d):
+            mh = f"<b style='background:#cfe2ff;color:#0a3d91'>{_html.escape(m)}</b>"
+            dh = f"<b style='background:#ffc9c9;color:#a10000'>{_html.escape(d)}</b>"
+        elif m and d:
+            mh, dh = _mark_diff(m, d)
+        else:
+            mh = _html.escape(m) if m else "<span style='color:#999'>(空欄)</span>"
+            dh = _html.escape(d) if d else "<span style='color:#999'>(空欄)</span>"
+        bg = HTML_BG[f.severity]
+        body.append(
+            f"<tr style='background:{bg}'><td style='{td};white-space:nowrap;font-weight:600'>{label[f.severity]}</td>"
+            f"<td style='{td};text-align:right'>{f.excel_row}</td><td style='{td}'>{_html.escape(f.store_id)}</td>"
+            f"<td style='{td};white-space:nowrap'>{_html.escape(f.store_name)}</td>"
+            f"<td style='{td};white-space:nowrap'>{_html.escape(f.item)}</td>"
+            f"<td style='{td};min-width:180px'>{mh}</td><td style='{td};min-width:180px'>{dh}</td>"
+            f"<td style='{td};color:#555'>{_html.escape(f.comment)}</td></tr>"
+        )
+    return (
+        "<div style='max-height:500px;overflow:auto;border:1px solid #ddd;border-radius:6px'>"
         "<table style='border-collapse:collapse;font-size:13px;width:100%'>"
         f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
     )

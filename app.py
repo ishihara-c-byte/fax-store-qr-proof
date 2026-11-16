@@ -133,11 +133,8 @@ for name, targets, findings, err in st.session_state.get("results", []):
     st.markdown(c.matrix_html(targets, findings, pick, only_ng), unsafe_allow_html=True)
 
     with st.expander("📋 指摘を1件ずつ一覧で見る"):
-        df = pd.DataFrame([x.as_dict() for x in findings if x.severity != "情報"])
-        if df.empty:
-            st.write("指摘はありません")
-        else:
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        st.caption("青＝マスタにだけある文字、赤＝Excelにだけある文字")
+        st.markdown(c.findings_html(findings), unsafe_allow_html=True)
 
     st.download_button(
         "結果をExcelでダウンロード",
