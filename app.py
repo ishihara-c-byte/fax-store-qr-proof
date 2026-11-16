@@ -1,3 +1,4 @@
+import html
 import re
 import urllib.request
 
@@ -126,7 +127,7 @@ if go:
         tab1, tab2 = st.tabs(["🗂 店舗別チェック表", "📋 指摘一覧"])
 
         with tab1:
-            st.caption("✅ 問題なし　❌ 高(誤りの可能性大)　⚠️ 中(要確認)　🔸 低(空白・ハイフンだけ)　／　マスの中は「マスタは〇〇だが、Excelは△△」と表示")
+            st.caption("✅ 問題なし　❌ 誤りの可能性大　⚠️ 要確認　🔸 空白・ハイフンの違いだけ　／　違いの中身は表の下の枠で確認できます")
             cc1, cc2 = st.columns([3, 1])
             pick = cc1.multiselect(
                 "チェックする項目(列)", list(c.MATRIX_COLUMNS), default=list(c.MATRIX_COLUMNS), key=f"cols_{f.name}"
@@ -147,6 +148,42 @@ if go:
                 ]
 
             st.dataframe(mview.style.apply(paint, axis=1), use_container_width=True, hide_index=True, height=600)
+
+            # ---- 違いの詳細(店舗ごとに枠で囲んで、マスタとExcelを並べる) ----
+            st.markdown("#### 違いの詳細")
+            by_row = {}
+            for x in findings:
+                col = c.finding_column(x)
+                if col in pick and x.severity in ("高", "中", "低"):
+                    by_row.setdefault(x.excel_row, []).append(x)
+                elif x.item == "店舗ID" and x.severity == "高":
+                    by_row.setdefault(x.excel_row, []).append(x)
+            if not by_row:
+                st.success("選んだ項目に違いはありません 🎉")
+            for t in targets:
+                xs = by_row.get(t.excel_row)
+                if not xs:
+                    continue
+                worst = min(xs, key=lambda x: c.SEVERITY_ORDER[x.severity])
+                with st.container(border=True):
+                    st.markdown(f"**{c.MARK[worst.severity]} {t.store_name}**　（店舗ID {t.store_id}／Excel {t.excel_row}行目）")
+                    trs = []
+                    for x in xs:
+                        bg = colors[x.severity]
+                        m_ = html.escape(x.master) or '<span style="color:#999">（空欄）</span>'
+                        e_ = html.escape(x.draft) or '<span style="color:#999">（空欄）</span>'
+                        trs.append(
+                            f"<tr><td style='white-space:nowrap'>{c.MARK[x.severity]} {html.escape(x.item)}</td>"
+                            f"<td>{m_}</td><td style='background:{bg}'>{e_}</td>"
+                            f"<td style='color:#555'>{html.escape(x.comment)}</td></tr>"
+                        )
+                    st.markdown(
+                        "<table style='width:100%;border-collapse:collapse'>"
+                        "<tr style='background:#f0f2f6'><th style='width:14%'>項目</th><th style='width:30%'>マスタ（正）</th>"
+                        "<th style='width:30%'>Excel（原稿）</th><th>コメント</th></tr>"
+                        + "".join(trs) + "</table>",
+                        unsafe_allow_html=True,
+                    )
 
         with tab2:
             df = pd.DataFrame([x.as_dict() for x in findings])

@@ -376,6 +376,13 @@ def _short(s: str, n: int = 18) -> str:
     return s if len(s) <= n else s[:n] + "…"
 
 
+def finding_column(f: Finding) -> str | None:
+    for col, items in MATRIX_COLUMNS.items():
+        if f.item in items:
+            return col
+    return None
+
+
 def build_matrix(targets: list[TargetRow], findings: list[Finding]):
     """戻り値: (行のリスト, 各セルの重要度 {(行番号, 列名): 重要度})"""
     item_to_col = {it: col for col, items in MATRIX_COLUMNS.items() for it in items}
@@ -400,11 +407,7 @@ def build_matrix(targets: list[TargetRow], findings: list[Finding]):
                 sev_map[(i, col)] = "OK"
                 continue
             worst = min(hits, key=lambda f: SEVERITY_ORDER[f.severity])
-            parts = []
-            for f in hits:
-                prefix = f"{f.item}:" if len(MATRIX_COLUMNS[col]) > 1 else ""
-                parts.append(f"{prefix}マスタは「{_short(f.master, 22) or '空欄'}」だが、Excelは「{_short(f.draft, 22) or '空欄'}」")
-            r[col] = f"{MARK[worst.severity]} " + " ／ ".join(parts)
+            r[col] = MARK[worst.severity]
             sev_map[(i, col)] = worst.severity
         n_bad = sum(1 for col in MATRIX_COLUMNS if sev_map[(i, col)] in ("高", "中", "低"))
         r["判定"] = OK_MARK if n_bad == 0 else f"{MARK[min((sev_map[(i, c)] for c in MATRIX_COLUMNS if sev_map[(i, c)] in SEVERITY_ORDER and sev_map[(i, c)] != '情報'), key=SEVERITY_ORDER.get)]} {n_bad}件"
