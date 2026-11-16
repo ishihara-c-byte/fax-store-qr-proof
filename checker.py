@@ -567,3 +567,100 @@ def findings_to_xlsx(findings: list[Finding], matrix=None) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# 画面用の表(HTML)。違う文字だけ色を付けて、マスタとExcelを上下に並べる
+# ---------------------------------------------------------------------------
+import difflib
+import html as _html
+
+HTML_BG = {"高": "#fde2e4", "中": "#fff4d6", "低": "#eeeeee", "OK": "#eaf6ec"}
+
+
+def _mark_diff(a: str, b: str) -> tuple[str, str]:
+    """a(マスタ) と b(Excel) の違う部分に色を付けたHTMLを返す"""
+    sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    out_a, out_b = [], []
+    for op, i1, i2, j1, j2 in sm.get_opcodes():
+        sa, sb = _html.escape(a[i1:i2]), _html.escape(b[j1:j2])
+        if op == "equal":
+            out_a.append(sa)
+            out_b.append(sb)
+        else:
+            if sa:
+                out_a.append(f"<b style='background:#cfe2ff;color:#0a3d91'>{sa}</b>")
+            if sb:
+                out_b.append(f"<b style='background:#ffc9c9;color:#a10000'>{sb}</b>")
+    return "".join(out_a), "".join(out_b)
+
+
+def _cell_html(fs: list[Finding], multi: bool) -> str:
+    parts = []
+    for f in fs:
+        m, d = f.master.replace("\n", " "), f.draft.replace("\n", " ")
+        if m and d and f.item in VALUE_ITEMS:
+            mh = f"<b style='background:#cfe2ff;color:#0a3d91'>{_html.escape(m)}</b>"
+            dh = f"<b style='background:#ffc9c9;color:#a10000'>{_html.escape(d)}</b>"
+        elif m and d:
+            mh, dh = _mark_diff(m, d)
+        else:
+            mh = _html.escape(m) if m else "<span style='color:#999'>(空欄)</span>"
+            dh = _html.escape(d) if d else "<span style='color:#999'>(空欄)</span>"
+        head = f"<div style='font-weight:600'>{_html.escape(f.item)}</div>" if multi else ""
+        hint = ""
+        if f.item not in VALUE_ITEMS:
+            hint = f"<div style='color:#666;font-size:11px'>{_html.escape(cell_text(f, False))}</div>"
+        parts.append(
+            f"{head}<div><span style='color:#0a3d91;font-size:11px'>マスタ</span> {mh}</div>"
+            f"<div><span style='color:#a10000;font-size:11px'>Excel</span> {dh}</div>{hint}"
+        )
+    return "<hr style='margin:4px 0;border:none;border-top:1px dashed #ccc'>".join(parts)
+
+
+def matrix_html(targets: list[TargetRow], findings: list[Finding], cols: list[str], only_ng: bool = False) -> str:
+    item_to_col = {it: col for col, items in MATRIX_COLUMNS.items() for it in items}
+    by_row: dict[int, list[Finding]] = {}
+    for f in findings:
+        by_row.setdefault(f.excel_row, []).append(f)
+
+    th = "position:sticky;top:0;background:#444;color:#fff;padding:6px;font-weight:500;z-index:1"
+    td = "border:1px solid #ddd;padding:6px;vertical-align:top"
+    head = "".join(f"<th style='{th}'>{h}</th>" for h in ["行", "店舗ID", "店舗名(Excel)", "判定"] + cols)
+    body = []
+    for t in targets:
+        fs = [f for f in by_row.get(t.excel_row, []) if f.severity in ("高", "中", "低")]
+        missing = any(f.item == "店舗ID" for f in fs)
+        cells, n_bad, worst = [], 0, None
+        for col in cols:
+            hits = [f for f in fs if item_to_col.get(f.item) == col]
+            if missing:
+                cells.append(f"<td style='{td};background:{HTML_BG['高']}'>❌ マスタにない店舗ID</td>")
+                n_bad += 1
+                worst = "高"
+                continue
+            if not hits:
+                cells.append(f"<td style='{td};background:{HTML_BG['OK']};text-align:center'>✅</td>")
+                continue
+            w = min(hits, key=lambda f: SEVERITY_ORDER[f.severity]).severity
+            worst = w if worst is None or SEVERITY_ORDER[w] < SEVERITY_ORDER[worst] else worst
+            n_bad += 1
+            cells.append(
+                f"<td style='{td};background:{HTML_BG[w]};min-width:170px'>"
+                f"<div>{MARK[w]}</div>{_cell_html(hits, len(MATRIX_COLUMNS[col]) > 1)}</td>"
+            )
+        if only_ng and n_bad == 0:
+            continue
+        judge = OK_MARK if n_bad == 0 else f"{MARK[worst]} {n_bad}件"
+        body.append(
+            f"<tr><td style='{td};text-align:right'>{t.excel_row}</td><td style='{td}'>{_html.escape(t.store_id)}</td>"
+            f"<td style='{td};white-space:nowrap'>{_html.escape(t.store_name)}</td>"
+            f"<td style='{td};white-space:nowrap'>{judge}</td>{''.join(cells)}</tr>"
+        )
+    if not body:
+        return "<p>違いがある店舗はありません 🎉</p>"
+    return (
+        "<div style='max-height:650px;overflow:auto;border:1px solid #ddd;border-radius:6px'>"
+        "<table style='border-collapse:collapse;font-size:13px;width:100%'>"
+        f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
+    )

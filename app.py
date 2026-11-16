@@ -123,34 +123,14 @@ for name, targets, findings, err in st.session_state.get("results", []):
     else:
         st.markdown(f"**{len(targets)}店舗中 {n_bad}店舗に違いがあります**")
 
-    st.caption("✅ 問題なし　❌ 間違いの可能性大　⚠️ 要確認　🔸 空白・ハイフンの違いだけ　／　違うマスには、何が違うかを書いています")
+    st.caption("✅ 問題なし　❌ 間違いの可能性大　⚠️ 要確認　🔸 空白・ハイフンの違いだけ　／　違うマスは マスタ と Excel を上下に並べ、違う文字に色を付けています(青＝マスタ、赤＝Excel)")
     cc1, cc2 = st.columns([3, 1])
     pick = cc1.multiselect(
         "チェックする項目(列)", list(c.MATRIX_COLUMNS), default=list(c.MATRIX_COLUMNS), key=f"cols_{name}"
     )
     only_ng = cc2.checkbox("違いがある店舗だけ", value=False, key=f"ng_{name}")
 
-    mdf = pd.DataFrame(mrows)
-    keep_idx = [
-        i for i in range(len(mrows))
-        if not only_ng or any(sev_map[(i, col)] in ("高", "中", "低") for col in pick)
-    ]
-    mview = mdf.loc[keep_idx, ["行", "店舗ID", "店舗名(Excel)", "判定"] + pick]
-
-    def paint(r):
-        return [
-            f"background-color: {colors[sev_map[(r.name, k)]]}" if k in c.MATRIX_COLUMNS else ""
-            for k in r.index
-        ]
-
-    st.dataframe(
-        mview.style.apply(paint, axis=1),
-        use_container_width=True,
-        hide_index=True,
-        height=600,
-        column_config={k: st.column_config.TextColumn(k, width="medium") for k in pick},
-    )
-    st.caption("※ マスの文字が切れているときは、マスにマウスを乗せるかダブルクリックすると全文が見られます。")
+    st.markdown(c.matrix_html(targets, findings, pick, only_ng), unsafe_allow_html=True)
 
     with st.expander("📋 指摘を1件ずつ一覧で見る"):
         df = pd.DataFrame([x.as_dict() for x in findings if x.severity != "情報"])
