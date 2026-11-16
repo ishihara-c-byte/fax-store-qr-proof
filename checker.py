@@ -433,20 +433,36 @@ def finding_column(f: Finding) -> str | None:
 CELL_PREFIX = {"DX価格": "DX ", "HC価格": "HC ", "住所２": "住所2 ", "QRコードURL(Web申込)": "Web申込 "}
 
 
-def cell_text(f: Finding, multi: bool, n: int = 12) -> str:
-    """表のマスに入れる短い説明「マスタ:600／Excel:550」"""
-    mm, dd = f.master.replace("\n", " "), f.draft.replace("\n", " ")
-    # 頭が同じ文言なら、違いが出る所から見せる
-    k = 0
-    while k < min(len(mm), len(dd)) and mm[k] == dd[k]:
-        k += 1
-    if k >= 6:
-        mm = "…" + (mm[k:].strip() or "(ここまで)")
-        dd = "…" + (dd[k:].strip() or "(ここまで)")
-    m = _short(mm, n) if mm else "空欄"
-    d = _short(dd, n) if dd else "空欄"
+VALUE_ITEMS = {"電話番号", "FAX番号", "DX価格", "HC価格", "QRコードURL", "QRコードURL(Web申込)", "店舗ID"}
+
+
+def cell_text(f: Finding, multi: bool, n: int = 14) -> str:
+    """表のマスに入れる、ひと目でわかる説明"""
     head = CELL_PREFIX.get(f.item, "") if multi else ""
-    return f"{head}マスタ:{m}／Excel:{d}"
+    m, d = f.master.replace("\n", " "), f.draft.replace("\n", " ")
+
+    # 電話・FAX・価格・URL は値をそのまま並べる
+    if f.item in VALUE_ITEMS:
+        if not m:
+            return f"{head}マスタが空欄(Excel {d})"
+        if not d:
+            return f"{head}Excelが空欄(マスタ {m})"
+        return f"{head}マスタ {m}・Excel {d}"
+
+    # 文言・店舗名・住所 は「どう違うか」を言葉で
+    if not d and m:
+        return f"{head}Excelが空欄(マスタには記載あり)"
+    if d and not m:
+        return f"{head}マスタは空欄なのに、Excelに記載あり"
+    if "削除" in m and d:
+        return f"{head}マスタに「削除」の指示あり。Excelに文言が残っている"
+    if has_note(m) and nospace(norm(d)) in nospace(norm(m)):
+        return f"{head}マスタの変更メモと同じ内容。メモ通りでよいか確認"
+    if has_note(m):
+        return f"{head}マスタに変更メモあり。内容を確認"
+    if nospace(norm(d)) == nospace(norm(m)):
+        return f"{head}空白の有無だけ違う"
+    return f"{head}内容が違う(マスタ「{_short(m, n)}」・Excel「{_short(d, n)}」)"
 
 
 def diff_text(f: Finding, n: int = 30) -> str:

@@ -123,7 +123,7 @@ for name, targets, findings, err in st.session_state.get("results", []):
     else:
         st.markdown(f"**{len(targets)}店舗中 {n_bad}店舗に違いがあります**")
 
-    st.caption("✅ 問題なし　❌ 間違いの可能性大　⚠️ 要確認　🔸 空白・ハイフンの違いだけ　／　違うマスには「マスタ:正しい値／Excel:Excelの値」を表示")
+    st.caption("✅ 問題なし　❌ 間違いの可能性大　⚠️ 要確認　🔸 空白・ハイフンの違いだけ　／　違うマスには、何が違うかを書いています")
     cc1, cc2 = st.columns([3, 1])
     pick = cc1.multiselect(
         "チェックする項目(列)", list(c.MATRIX_COLUMNS), default=list(c.MATRIX_COLUMNS), key=f"cols_{name}"
