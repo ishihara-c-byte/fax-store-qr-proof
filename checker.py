@@ -354,6 +354,53 @@ def run_check(targets: list[TargetRow], master: Master, web: dict[str, str]) -> 
 
 
 # ---------------------------------------------------------------------------
+# シンプルな結果表(違いがあったところだけ1行ずつ)
+# ---------------------------------------------------------------------------
+LABEL = {"高": "間違い", "中": "要確認", "低": "空白・ハイフン違い"}
+
+
+def simple_rows(findings: list[Finding], include_minor: bool = False) -> list[dict]:
+    out = []
+    for f in sorted(findings, key=lambda x: (x.excel_row, SEVERITY_ORDER[x.severity])):
+        if f.severity == "情報" or (f.severity == "低" and not include_minor):
+            continue
+        out.append({
+            "判定": LABEL[f.severity],
+            "店舗ID": f.store_id,
+            "店舗名": f.store_name,
+            "項目": f.item,
+            "マスタ": f.master or "(空欄)",
+            "Excel": f.draft or "(空欄)",
+        })
+    return out
+
+
+def simple_xlsx(rows: list[dict]) -> bytes:
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "チェック結果"
+    head = ["判定", "店舗ID", "店舗名", "項目", "マスタ(正)", "Excel"]
+    ws.append(head)
+    for c_ in ws[1]:
+        c_.font = Font(bold=True, color="FFFFFF")
+        c_.fill = PatternFill("solid", fgColor="444444")
+    color = {"間違い": "F8D7DA", "要確認": "FFF3CD", "空白・ハイフン違い": "EEEEEE"}
+    for r in rows:
+        ws.append([r["判定"], r["店舗ID"], r["店舗名"], r["項目"], r["マスタ"], r["Excel"]])
+        for c_ in ws[ws.max_row]:
+            c_.fill = PatternFill("solid", fgColor=color[r["判定"]])
+            c_.alignment = Alignment(wrap_text=True, vertical="top")
+    for i, w in enumerate([12, 8, 26, 16, 50, 50], start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # 店舗別チェック表(1店舗1行、チェック項目を列に)
 # ---------------------------------------------------------------------------
 # 表の列: 列名 -> その列にまとめる指摘の「項目」
@@ -383,6 +430,37 @@ def finding_column(f: Finding) -> str | None:
     return None
 
 
+CELL_PREFIX = {"DX価格": "DX ", "HC価格": "HC ", "住所２": "住所2 ", "QRコードURL(Web申込)": "Web申込 "}
+
+
+def cell_text(f: Finding, multi: bool, n: int = 12) -> str:
+    """表のマスに入れる短い説明「マスタ:600／Excel:550」"""
+    mm, dd = f.master.replace("\n", " "), f.draft.replace("\n", " ")
+    # 頭が同じ文言なら、違いが出る所から見せる
+    k = 0
+    while k < min(len(mm), len(dd)) and mm[k] == dd[k]:
+        k += 1
+    if k >= 6:
+        mm = "…" + (mm[k:].strip() or "(ここまで)")
+        dd = "…" + (dd[k:].strip() or "(ここまで)")
+    m = _short(mm, n) if mm else "空欄"
+    d = _short(dd, n) if dd else "空欄"
+    head = CELL_PREFIX.get(f.item, "") if multi else ""
+    return f"{head}マスタ:{m}／Excel:{d}"
+
+
+def diff_text(f: Finding, n: int = 30) -> str:
+    """1件の指摘を「DX価格 マスタ600／Excel550」の形にする"""
+    m = f"「{_short(f.master, n)}」" if f.master else "(空欄)"
+    d = f"「{_short(f.draft, n)}」" if f.draft else "(空欄)"
+    return f"{f.item} マスタ{m}／Excel{d}"
+
+
+def join_details(details: dict[str, str], cols=None) -> str:
+    keys = [k for k in details if cols is None or k in cols or k == "店舗ID"]
+    return " ｜ ".join(details[k] for k in keys)
+
+
 def build_matrix(targets: list[TargetRow], findings: list[Finding]):
     """戻り値: (行のリスト, 各セルの重要度 {(行番号, 列名): 重要度})"""
     item_to_col = {it: col for col, items in MATRIX_COLUMNS.items() for it in items}
@@ -394,9 +472,11 @@ def build_matrix(targets: list[TargetRow], findings: list[Finding]):
     for i, t in enumerate(targets):
         fs = by_row.get(t.excel_row, [])
         r = {"行": t.excel_row, "店舗ID": t.store_id, "店舗名(Excel)": t.store_name}
+        details: dict[str, str] = {}
         missing = any(f.item == "店舗ID" and f.severity == "高" for f in fs)
         for col in MATRIX_COLUMNS:
             if missing:
+                details["店舗ID"] = "マスタにこの店舗IDがない"
                 r[col] = "－ マスタになし"
                 sev_map[(i, col)] = "高"
                 continue
@@ -407,10 +487,13 @@ def build_matrix(targets: list[TargetRow], findings: list[Finding]):
                 sev_map[(i, col)] = "OK"
                 continue
             worst = min(hits, key=lambda f: SEVERITY_ORDER[f.severity])
-            r[col] = MARK[worst.severity]
+            r[col] = MARK[worst.severity] + " " + "　".join(cell_text(f, len(MATRIX_COLUMNS[col]) > 1) for f in hits)
+            details[col] = "、".join(diff_text(f) for f in hits)
             sev_map[(i, col)] = worst.severity
         n_bad = sum(1 for col in MATRIX_COLUMNS if sev_map[(i, col)] in ("高", "中", "低"))
         r["判定"] = OK_MARK if n_bad == 0 else f"{MARK[min((sev_map[(i, c)] for c in MATRIX_COLUMNS if sev_map[(i, c)] in SEVERITY_ORDER and sev_map[(i, c)] != '情報'), key=SEVERITY_ORDER.get)]} {n_bad}件"
+        r["_details"] = details
+        r["違いの内容"] = join_details(details)
         rows.append(r)
     return rows, sev_map
 
@@ -430,7 +513,7 @@ def findings_to_xlsx(findings: list[Finding], matrix=None) -> bytes:
     if matrix is not None:
         mrows, sev_map = matrix
         ws.title = "店舗別チェック表"
-        head = ["行", "店舗ID", "店舗名(Excel)", "判定"] + list(MATRIX_COLUMNS)
+        head = ["行", "店舗ID", "店舗名(Excel)", "判定"] + list(MATRIX_COLUMNS) + ["違いの内容"]
         ws.append(head)
         for c in ws[1]:
             c.font = Font(bold=True, color="FFFFFF")
@@ -439,7 +522,7 @@ def findings_to_xlsx(findings: list[Finding], matrix=None) -> bytes:
             ws.append([r[k] for k in head])
             for j, col in enumerate(MATRIX_COLUMNS, start=5):
                 ws.cell(ws.max_row, j).fill = PatternFill("solid", fgColor=CELL_COLORS[sev_map[(i, col)]])
-        for i, w in enumerate([6, 8, 24, 9] + [22] * len(MATRIX_COLUMNS), start=1):
+        for i, w in enumerate([6, 8, 24, 9] + [26] * len(MATRIX_COLUMNS) + [60], start=1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
         for row in ws.iter_rows(min_row=2):
             for c in row:
