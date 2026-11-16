@@ -354,14 +354,97 @@ def run_check(targets: list[TargetRow], master: Master, web: dict[str, str]) -> 
 
 
 # ---------------------------------------------------------------------------
+# 店舗別チェック表(1店舗1行、チェック項目を列に)
+# ---------------------------------------------------------------------------
+# 表の列: 列名 -> その列にまとめる指摘の「項目」
+MATRIX_COLUMNS = {
+    "正式店舗名": ["正式店舗名"],
+    "TEL": ["電話番号"],
+    "FAX": ["FAX番号"],
+    "住所": ["住所", "住所２"],
+    "価格": ["DX価格", "HC価格"],
+    "味噌汁文言": ["味噌汁（文言）"],
+    "受付時間": ["受付時間（文言）"],
+    "QRコード": ["QRコードURL", "QRコードURL(Web申込)"],
+}
+MARK = {"高": "❌", "中": "⚠️", "低": "🔸", "情報": "ℹ️"}
+OK_MARK = "✅"
+
+
+def _short(s: str, n: int = 18) -> str:
+    s = s.replace("\n", " ")
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def build_matrix(targets: list[TargetRow], findings: list[Finding]):
+    """戻り値: (行のリスト, 各セルの重要度 {(行番号, 列名): 重要度})"""
+    item_to_col = {it: col for col, items in MATRIX_COLUMNS.items() for it in items}
+    by_row: dict[int, list[Finding]] = {}
+    for f in findings:
+        by_row.setdefault(f.excel_row, []).append(f)
+
+    rows, sev_map = [], {}
+    for i, t in enumerate(targets):
+        fs = by_row.get(t.excel_row, [])
+        r = {"行": t.excel_row, "店舗ID": t.store_id, "店舗名(原稿)": t.store_name}
+        missing = any(f.item == "店舗ID" and f.severity == "高" for f in fs)
+        for col in MATRIX_COLUMNS:
+            if missing:
+                r[col] = "－ マスタになし"
+                sev_map[(i, col)] = "高"
+                continue
+            hits = [f for f in fs if item_to_col.get(f.item) == col and f.severity != "情報"]
+            info = [f for f in fs if item_to_col.get(f.item) == col and f.severity == "情報"]
+            if not hits:
+                r[col] = OK_MARK if not info else f"{OK_MARK}{MARK['情報']}"
+                sev_map[(i, col)] = "OK" if not info else "情報"
+                continue
+            worst = min(hits, key=lambda f: SEVERITY_ORDER[f.severity])
+            parts = []
+            for f in hits:
+                prefix = f"{f.item}:" if len(MATRIX_COLUMNS[col]) > 1 else ""
+                parts.append(f"{prefix}{_short(f.draft) or '(空欄)'} → {_short(f.master) or '(空欄)'}")
+            r[col] = f"{MARK[worst.severity]} " + " / ".join(parts)
+            sev_map[(i, col)] = worst.severity
+        n_bad = sum(1 for col in MATRIX_COLUMNS if sev_map[(i, col)] in ("高", "中", "低"))
+        r["判定"] = OK_MARK if n_bad == 0 else f"{MARK[min((sev_map[(i, c)] for c in MATRIX_COLUMNS if sev_map[(i, c)] in SEVERITY_ORDER and sev_map[(i, c)] != '情報'), key=SEVERITY_ORDER.get)]} {n_bad}件"
+        rows.append(r)
+    return rows, sev_map
+
+
+# ---------------------------------------------------------------------------
 # 結果のExcel出力
 # ---------------------------------------------------------------------------
-def findings_to_xlsx(findings: list[Finding]) -> bytes:
+CELL_COLORS = {"高": "F8D7DA", "中": "FFF3CD", "低": "E2E3E5", "情報": "D1ECF1", "OK": "D4EDDA"}
+
+
+def findings_to_xlsx(findings: list[Finding], matrix=None) -> bytes:
     from openpyxl.styles import Alignment, Font, PatternFill
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "校正結果"
+
+    if matrix is not None:
+        mrows, sev_map = matrix
+        ws.title = "店舗別チェック表"
+        head = ["行", "店舗ID", "店舗名(原稿)", "判定"] + list(MATRIX_COLUMNS)
+        ws.append(head)
+        for c in ws[1]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = PatternFill("solid", fgColor="444444")
+        for i, r in enumerate(mrows):
+            ws.append([r[k] for k in head])
+            for j, col in enumerate(MATRIX_COLUMNS, start=5):
+                ws.cell(ws.max_row, j).fill = PatternFill("solid", fgColor=CELL_COLORS[sev_map[(i, col)]])
+        for i, w in enumerate([6, 8, 24, 9] + [22] * len(MATRIX_COLUMNS), start=1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+        for row in ws.iter_rows(min_row=2):
+            for c in row:
+                c.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.freeze_panes = "E2"
+        ws = wb.create_sheet()
+
+    ws.title = "指摘一覧"
     cols = ["重要度", "行", "店舗ID", "店舗名", "項目", "原稿", "マスタ", "コメント"]
     ws.append(cols)
     for c in ws[1]:

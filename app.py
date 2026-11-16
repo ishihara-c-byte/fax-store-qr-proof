@@ -121,24 +121,51 @@ if go:
             st.success("指摘はありません 🎉")
             continue
 
-        df = pd.DataFrame([x.as_dict() for x in findings])
-        show = st.multiselect(
-            "表示する重要度", list(c.SEVERITY_ORDER), default=["高", "中"], key=f"sev_{f.name}"
-        )
-        view = df[df["重要度"].isin(show)]
+        colors = {k: f"#{v}" for k, v in c.CELL_COLORS.items()}
+        matrix = c.build_matrix(targets, findings)
+        tab1, tab2 = st.tabs(["🗂 店舗別チェック表", "📋 指摘一覧"])
 
-        colors = {"高": "#f8d7da", "中": "#fff3cd", "低": "#e2e3e5", "情報": "#d1ecf1"}
-        st.dataframe(
-            view.style.apply(
-                lambda r: [f"background-color: {colors[r['重要度']]}" if k == "重要度" else "" for k in r.index],
-                axis=1,
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        with tab1:
+            st.caption("✅ 問題なし ❌ 高(誤りの可能性大) ⚠️ 中(要確認) 🔸 低(空白・ハイフンだけ) ℹ️ 情報 ― 「原稿 → マスタ」の順に表示")
+            cc1, cc2 = st.columns([3, 1])
+            pick = cc1.multiselect(
+                "チェックする項目(列)", list(c.MATRIX_COLUMNS), default=list(c.MATRIX_COLUMNS), key=f"cols_{f.name}"
+            )
+            only_ng = cc2.checkbox("指摘がある店舗だけ", value=False, key=f"ng_{f.name}")
+            mrows, sev_map = matrix
+            mdf = pd.DataFrame(mrows)
+            keep_idx = [
+                i for i in range(len(mrows))
+                if not only_ng or any(sev_map[(i, col)] in ("高", "中", "低") for col in pick)
+            ]
+            mview = mdf.loc[keep_idx, ["行", "店舗ID", "店舗名(原稿)", "判定"] + pick]
+
+            def paint(r):
+                return [
+                    f"background-color: {colors[sev_map[(r.name, k)]]}" if k in c.MATRIX_COLUMNS else ""
+                    for k in r.index
+                ]
+
+            st.dataframe(mview.style.apply(paint, axis=1), use_container_width=True, hide_index=True, height=600)
+
+        with tab2:
+            df = pd.DataFrame([x.as_dict() for x in findings])
+            show = st.multiselect(
+                "表示する重要度", list(c.SEVERITY_ORDER), default=["高", "中"], key=f"sev_{f.name}"
+            )
+            view = df[df["重要度"].isin(show)]
+            st.dataframe(
+                view.style.apply(
+                    lambda r: [f"background-color: {colors[r['重要度']]}" if k == "重要度" else "" for k in r.index],
+                    axis=1,
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
         st.download_button(
-            "結果をExcelでダウンロード",
-            c.findings_to_xlsx(findings),
+            "結果をExcelでダウンロード(店舗別チェック表+指摘一覧)",
+            c.findings_to_xlsx(findings, matrix),
             file_name=f"校正結果_{f.name}",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"dl_{f.name}",
