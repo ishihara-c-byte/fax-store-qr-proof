@@ -126,7 +126,7 @@ if go:
         tab1, tab2 = st.tabs(["🗂 店舗別チェック表", "📋 指摘一覧"])
 
         with tab1:
-            st.caption("✅ 問題なし ❌ 高(誤りの可能性大) ⚠️ 中(要確認) 🔸 低(空白・ハイフンだけ) ℹ️ 情報 ― 「原稿 → マスタ」の順に表示")
+            st.caption("✅ 問題なし　❌ 高(誤りの可能性大)　⚠️ 中(要確認)　🔸 低(空白・ハイフンだけ)　／　マスの中は「マスタは〇〇だが、Excelは△△」と表示")
             cc1, cc2 = st.columns([3, 1])
             pick = cc1.multiselect(
                 "チェックする項目(列)", list(c.MATRIX_COLUMNS), default=list(c.MATRIX_COLUMNS), key=f"cols_{f.name}"
@@ -138,7 +138,7 @@ if go:
                 i for i in range(len(mrows))
                 if not only_ng or any(sev_map[(i, col)] in ("高", "中", "低") for col in pick)
             ]
-            mview = mdf.loc[keep_idx, ["行", "店舗ID", "店舗名(原稿)", "判定"] + pick]
+            mview = mdf.loc[keep_idx, ["行", "店舗ID", "店舗名(Excel)", "判定"] + pick]
 
             def paint(r):
                 return [

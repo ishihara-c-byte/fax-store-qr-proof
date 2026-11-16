@@ -230,8 +230,8 @@ class Finding:
             "店舗ID": self.store_id,
             "店舗名": self.store_name,
             "項目": self.item,
-            "原稿": self.draft,
-            "マスタ": self.master,
+            "マスタ(正)": self.master,
+            "Excel(原稿)": self.draft,
             "コメント": self.comment,
         }
 
@@ -272,12 +272,12 @@ def compare_field(kind: str, label: str, d_raw, m_raw, default: str = ""):
 
     if kind == "url":
         if not d:
-            return ("高", "原稿のQRコードURLが空欄") if m else None
+            return ("高", "ExcelのQRコードURLが空欄") if m else None
         return ("高", "QRコードURLがマスタと違う")
 
     if kind == "phone":
         if not d and m:
-            return ("高", f"原稿の{label}が空欄")
+            return ("高", f"Excelの{label}が空欄")
         if digits(d) and digits(d) == digits(m):
             return ("低", "数字は同じ。ハイフン・空白の位置だけ違う")
         if has_note(m) or not digits(m):
@@ -286,9 +286,9 @@ def compare_field(kind: str, label: str, d_raw, m_raw, default: str = ""):
 
     if kind == "price":
         if not m:
-            return ("中", "マスタの価格が空欄。原稿の価格で正しいか確認")
+            return ("中", "マスタの価格が空欄。Excelの価格で正しいか確認")
         if not d:
-            return ("高", f"原稿の{label}が空欄")
+            return ("高", f"Excelの{label}が空欄")
         return ("高", f"{label}がマスタと違う")
 
     if nospace(d) == nospace(m):
@@ -300,12 +300,12 @@ def compare_field(kind: str, label: str, d_raw, m_raw, default: str = ""):
         if has_note(m):
             return ("中", "マスタに変更メモあり。最新の指示に沿っているか確認")
         if not d:
-            return ("中", "原稿が空欄、マスタには文言あり")
-        return ("中", "文言がマスタと違う")
+            return ("中", "Excelが空欄、マスタには文言あり")
+        return ("中", "マスタとExcelで文言が違う")
 
     # name / text
     if not d and m:
-        return ("高", f"原稿の{label}が空欄")
+        return ("高", f"Excelの{label}が空欄")
     if d and nospace(d) in nospace(m) and has_note(m):
         return ("中", "マスタに変更メモあり。最新の指示に沿っているか確認")
     if has_note(m):
@@ -386,7 +386,7 @@ def build_matrix(targets: list[TargetRow], findings: list[Finding]):
     rows, sev_map = [], {}
     for i, t in enumerate(targets):
         fs = by_row.get(t.excel_row, [])
-        r = {"行": t.excel_row, "店舗ID": t.store_id, "店舗名(原稿)": t.store_name}
+        r = {"行": t.excel_row, "店舗ID": t.store_id, "店舗名(Excel)": t.store_name}
         missing = any(f.item == "店舗ID" and f.severity == "高" for f in fs)
         for col in MATRIX_COLUMNS:
             if missing:
@@ -396,15 +396,15 @@ def build_matrix(targets: list[TargetRow], findings: list[Finding]):
             hits = [f for f in fs if item_to_col.get(f.item) == col and f.severity != "情報"]
             info = [f for f in fs if item_to_col.get(f.item) == col and f.severity == "情報"]
             if not hits:
-                r[col] = OK_MARK if not info else f"{OK_MARK}{MARK['情報']}"
-                sev_map[(i, col)] = "OK" if not info else "情報"
+                r[col] = OK_MARK
+                sev_map[(i, col)] = "OK"
                 continue
             worst = min(hits, key=lambda f: SEVERITY_ORDER[f.severity])
             parts = []
             for f in hits:
                 prefix = f"{f.item}:" if len(MATRIX_COLUMNS[col]) > 1 else ""
-                parts.append(f"{prefix}{_short(f.draft) or '(空欄)'} → {_short(f.master) or '(空欄)'}")
-            r[col] = f"{MARK[worst.severity]} " + " / ".join(parts)
+                parts.append(f"{prefix}マスタは「{_short(f.master, 22) or '空欄'}」だが、Excelは「{_short(f.draft, 22) or '空欄'}」")
+            r[col] = f"{MARK[worst.severity]} " + " ／ ".join(parts)
             sev_map[(i, col)] = worst.severity
         n_bad = sum(1 for col in MATRIX_COLUMNS if sev_map[(i, col)] in ("高", "中", "低"))
         r["判定"] = OK_MARK if n_bad == 0 else f"{MARK[min((sev_map[(i, c)] for c in MATRIX_COLUMNS if sev_map[(i, c)] in SEVERITY_ORDER and sev_map[(i, c)] != '情報'), key=SEVERITY_ORDER.get)]} {n_bad}件"
@@ -427,7 +427,7 @@ def findings_to_xlsx(findings: list[Finding], matrix=None) -> bytes:
     if matrix is not None:
         mrows, sev_map = matrix
         ws.title = "店舗別チェック表"
-        head = ["行", "店舗ID", "店舗名(原稿)", "判定"] + list(MATRIX_COLUMNS)
+        head = ["行", "店舗ID", "店舗名(Excel)", "判定"] + list(MATRIX_COLUMNS)
         ws.append(head)
         for c in ws[1]:
             c.font = Font(bold=True, color="FFFFFF")
@@ -445,7 +445,7 @@ def findings_to_xlsx(findings: list[Finding], matrix=None) -> bytes:
         ws = wb.create_sheet()
 
     ws.title = "指摘一覧"
-    cols = ["重要度", "行", "店舗ID", "店舗名", "項目", "原稿", "マスタ", "コメント"]
+    cols = ["重要度", "行", "店舗ID", "店舗名", "項目", "マスタ(正)", "Excel(原稿)", "コメント"]
     ws.append(cols)
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
